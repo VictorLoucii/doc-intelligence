@@ -4,6 +4,9 @@ const queryForm = document.getElementById('query-form');
 const queryError = document.getElementById('query-error');
 const answerEl = document.getElementById('answer');
 const citationsEl = document.getElementById('citations');
+const insightsBtn = document.getElementById('insights-btn');
+const insightsError = document.getElementById('insights-error');
+const insightsResults = document.getElementById('insights-results');
 
 uploadForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -69,5 +72,57 @@ queryForm.addEventListener('submit', async (event) => {
     card.appendChild(header);
     card.appendChild(text);
     citationsEl.appendChild(card);
+  }
+});
+
+insightsBtn.addEventListener('click', async () => {
+  insightsError.textContent = '';
+  insightsResults.innerHTML = '';
+
+  const response = await fetch('/insights', { method: 'POST' });
+
+  if (!response.ok) {
+    const errorBody = await response.json();
+    insightsError.textContent = errorBody.detail;
+    return;
+  }
+
+  const insights = await response.json();
+
+  for (const insight of insights) {
+    const card = document.createElement('div');
+    card.className = 'citation-card';
+
+    const text = document.createElement('p');
+    text.textContent = insight.insight_text;
+
+    const nextQuestion = document.createElement('p');
+    const strong = document.createElement('strong');
+    strong.textContent = 'Suggested next question: ';
+    nextQuestion.appendChild(strong);
+    nextQuestion.append(insight.suggested_next_question);
+
+    card.appendChild(text);
+    card.appendChild(nextQuestion);
+
+    for (const chunk of insight.supporting_chunks) {
+      const chunkCard = document.createElement('div');
+      chunkCard.className = 'citation-card';
+
+      const header = document.createElement('div');
+      const chunkStrong = document.createElement('strong');
+      chunkStrong.textContent = chunk.document_name;
+      header.appendChild(chunkStrong);
+      header.append(` — page ${chunk.page_number}, chunk ${chunk.chunk_index} (relevance ${chunk.relevance_score})`);
+
+      const chunkText = document.createElement('pre');
+      chunkText.textContent = chunk.chunk_text;
+
+      chunkCard.appendChild(header);
+      chunkCard.appendChild(chunkText);
+      card.appendChild(chunkCard);
+    }
+
+    insightsResults.appendChild(card);
   }
 });

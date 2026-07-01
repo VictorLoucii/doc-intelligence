@@ -243,6 +243,13 @@ class InsightSuggestion(BaseModel):
     suggested_next_question: str
 ```
 
+### 5.1 `POST /insights` Contract
+
+- No request body.
+- `response_model=list[InsightSuggestion]`.
+- Empty vector store (no documents uploaded) → `400` with a `detail` message.
+- Vector store has documents but fewer than 2 distinct documents indexed → `200` with `[]` (cross-document insights require at least 2 documents to synthesize across).
+
 ---
 
 ## 6. Chunking Strategy (Why 1000 Tokens)
