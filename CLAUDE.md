@@ -184,6 +184,7 @@ During the build, follow these rules to minimize Claude Code API token burn:
 - Ensure proper error handling: Never leave `except` blocks empty. Always log the exception via `logging.error(f"...", exc_info=True)` and return a descriptive HTTP error response.
 - Keep modules focused: aim for under **300 lines per file**. If a file grows beyond this, split into sub-modules before adding more logic.
 - **Non-Destructive Editing:** Preserve all existing comments, docstrings, and unrelated functions. Do not delete logic unless explicitly instructed.
+- **Documentation Sync:** If implementation must deviate from DESIGN.md/DECISIONS.md (new fallback, changed threshold, etc.), update the relevant doc in the same commit.
 - **Dry-Run Before Declaring Done:** Run `python eval.py` before declaring a task complete. Fix all failures before finishing. This is Rule 5.1 — it is repeated here for emphasis because it is the most commonly violated rule.
 - **Git Hygiene — Commit After Every Green Eval:** The commit trigger is `eval.py` passing at 100%. Once it passes, immediately stage, review, and commit before moving to the next task. Never run `git add .` — only stage files that directly implement the current sprint task. Always review `git diff --staged` before committing. Commit messages use format: `"S[X] T[Y]: [Feature Name]"` (e.g., `"S2 T1: add embedding service + FAISS vector store"`). The repository must be in a clean, committed state before starting the next sprint task.
 
