@@ -1157,17 +1157,37 @@ def test_edge_case_malformed_query():
 
 
 def test_edge_case_duplicate_upload_idempotent():
-    """Uploading the same PDF twice must be idempotent — no duplicate chunks.
+    """Uploading the same PDF bytes twice must be idempotent (Decision 12 SHA-256 dedup)."""
+    from fastapi.testclient import TestClient
 
-    Sprint 6 implementation:
-      - Upload PDF A, record chunk_count
-      - Upload PDF A again
-      - Assert total chunks in vector store did NOT increase
-    """
-    # STUB
-    chunks_after_first = 45
-    chunks_after_second = 45
-    assert chunks_after_first == chunks_after_second, "Dedup should prevent duplicate chunks"
+    from backend.main import app
+    from backend.services import vector_store as vs
+
+    client = TestClient(app)
+    document_id = None
+    try:
+        pdf_bytes = _make_pdf_bytes()
+
+        first = client.post("/upload", files={"files": ("dup_test.pdf", pdf_bytes, "application/pdf")})
+        assert first.status_code == 200
+        first_metadata = first.json()[0]
+        assert first_metadata["is_duplicate"] is False
+        assert first_metadata["metadata"]["chunk_count"] > 0
+        document_id = first_metadata["metadata"]["id"]
+
+        ntotal_before = vs._index.ntotal
+
+        second = client.post("/upload", files={"files": ("dup_test.pdf", pdf_bytes, "application/pdf")})
+        assert second.status_code == 200
+        second_metadata = second.json()[0]
+        assert second_metadata["is_duplicate"] is True
+        assert second_metadata["metadata"]["id"] == first_metadata["metadata"]["id"]
+        assert second_metadata["metadata"]["sha256"] == first_metadata["metadata"]["sha256"]
+
+        assert vs._index.ntotal == ntotal_before, "Duplicate upload must not add vectors to the store"
+    finally:
+        if document_id:
+            client.delete(f"/documents/{document_id}")
 
 
 # ===========================================================================
