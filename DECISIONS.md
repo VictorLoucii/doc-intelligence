@@ -310,5 +310,28 @@ across multiple GPU workers, and async upload with a status polling endpoint
 
 ---
 
+## Decision 14: Sigmoid-Normalize Cross-Encoder Logits Before Thresholding
+
+**Date:** July 2026
+**Status:** Active
+**Decision:** Apply `torch.sigmoid` to raw `CrossEncoder.predict()` scores before
+sorting, slicing, or thresholding in `rerank()`.
+
+**Reason:**
+- `ms-marco-MiniLM-L-12-v2` returns raw, unbounded logits, not a [0,1] probability.
+  Empirically verified: a clearly relevant pair scored ~7.4, clearly irrelevant
+  pairs scored ~-11.2 to -11.3 — well outside [0,1].
+- DESIGN.md Section 7's "score ≥ 0.3" threshold and `schemas.Citation.relevance_score`
+  (`ge=0.0, le=1.0`) both assume a normalized score. Using raw logits directly would
+  make the threshold meaningless and violate the Pydantic schema constraint.
+- Sigmoid preserves rank order (monotonic), so it does not change which chunks are
+  top-k — it only rescales scores into a valid, interpretable [0,1] range.
+
+**Tradeoff:** Sigmoid-normalized scores are not true calibrated probabilities
+(the model wasn't trained with a probabilistic loss), but they are monotonic and
+bounded, which is sufficient for thresholding and citation display.
+
+---
+
 *Last updated: July 2026*
 *Update this file whenever a new significant decision is made during the build.*

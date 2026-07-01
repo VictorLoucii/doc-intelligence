@@ -27,7 +27,9 @@ def rerank(query: str, candidates: list[tuple[Chunk, float]], top_k: int = 5) ->
         return []
 
     pairs = [(query, chunk.text) for chunk, _ in candidates]
-    scores = _model.predict(pairs)
+    raw_scores = _model.predict(pairs)
+    scores = torch.sigmoid(torch.tensor(raw_scores))
 
     reranked = sorted(zip((chunk for chunk, _ in candidates), scores), key=lambda item: item[1], reverse=True)
-    return [(chunk, float(score)) for chunk, score in reranked[:top_k]]
+    top = [(chunk, float(score)) for chunk, score in reranked[:top_k]]
+    return [(chunk, score) for chunk, score in top if score >= settings.RELEVANCE_THRESHOLD]

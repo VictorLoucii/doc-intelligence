@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     RERANKER_GPU_ID: int = 1
     LLM_GPU_ID: int = 2
 
+    # --- Reranker (CLAUDE.md Section 5.4) ---
+    RELEVANCE_THRESHOLD: float = 0.3
+
     # --- API keys ---
     ANTHROPIC_API_KEY: str = ""
 

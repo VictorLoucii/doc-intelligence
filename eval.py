@@ -680,6 +680,16 @@ def test_reranker_reduces_candidates():
     from backend.services.reranker import rerank
 
     query = "What are the payment terms for invoices?"
+    # First 5 chunks are genuinely relevant (score above RELEVANCE_THRESHOLD after
+    # sigmoid normalization); the rest are unrelated filler that the cross-encoder
+    # correctly scores near 0.0, so they don't survive relevance-threshold filtering.
+    relevant_texts = [
+        "Invoice payment terms require full payment within 30 days of the invoice date.",
+        "Payment for all invoices is due net 30 days from the invoice issue date.",
+        "Customers must pay invoices within a 30-day payment term as specified in the contract.",
+        "Late payment on invoices incurs a 1.5% monthly interest fee after the 30-day term.",
+        "Invoices are payable within 30 days; early payment discounts of 2% apply within 10 days.",
+    ]
     candidates = [
         (
             Chunk(
@@ -687,8 +697,8 @@ def test_reranker_reduces_candidates():
                 document_id="rr-doc",
                 document_name="test.pdf",
                 text=(
-                    "Invoice payment terms require full payment within 30 days of the invoice date."
-                    if i == 0
+                    relevant_texts[i]
+                    if i < len(relevant_texts)
                     else f"Unrelated filler text number {i} about office supplies and weather."
                 ),
                 page_number=1,
@@ -727,18 +737,47 @@ def test_reranker_improves_precision():
 
 
 def test_reranker_relevance_threshold():
-    """Chunks with cross-encoder score < 0.3 must be filtered out.
+    """Chunks with cross-encoder score < RELEVANCE_THRESHOLD must be filtered out."""
+    from backend.config import settings
+    from backend.models.schemas import Chunk
+    from backend.services.reranker import rerank
 
-    Sprint 3 implementation:
-      - Provide chunks with known low relevance to a query
-      - Run reranker
-      - Assert all returned chunks have score >= 0.3
-    """
-    # STUB: validates threshold constant
-    RELEVANCE_THRESHOLD = 0.3
-    mock_scores = [0.95, 0.82, 0.71, 0.45, 0.31]  # All above threshold
-    filtered = [s for s in mock_scores if s >= RELEVANCE_THRESHOLD]
-    assert len(filtered) == len(mock_scores), "All mock scores should pass threshold"
+    query = "What are the payment terms for invoices?"
+    candidates = [
+        (
+            Chunk(
+                id="rr-thresh-relevant",
+                document_id="rr-doc",
+                document_name="test.pdf",
+                text="Invoice payment terms require full payment within 30 days of the invoice date.",
+                page_number=1,
+                chunk_index=0,
+                token_count=15,
+            ),
+            1.0,
+        ),
+        (
+            Chunk(
+                id="rr-thresh-irrelevant",
+                document_id="rr-doc",
+                document_name="test.pdf",
+                text="Unrelated filler text about office supplies and weather.",
+                page_number=1,
+                chunk_index=1,
+                token_count=15,
+            ),
+            0.9,
+        ),
+    ]
+
+    results = rerank(query, candidates, top_k=5)
+
+    assert len(results) == 1, f"Expected only the relevant chunk to survive, got {len(results)}"
+    assert results[0][0].id == "rr-thresh-relevant"
+    assert all(score >= settings.RELEVANCE_THRESHOLD for _, score in results), (
+        "All returned scores must be >= RELEVANCE_THRESHOLD"
+    )
+    assert all(0.3 <= score <= 1.0 for _, score in results), "All returned scores must be within [0.3, 1.0]"
 
 
 # ===========================================================================
