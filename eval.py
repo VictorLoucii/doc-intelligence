@@ -853,85 +853,158 @@ def test_reranker_relevance_threshold():
 def test_citation_format_complete():
     """Every citation must have all 4 required fields: document_name, page_number,
     chunk_index, chunk_text (CLAUDE.md Rule 5.3).
-
-    Sprint 4 implementation:
-      - Generate an answer from real retrieved chunks
-      - Parse the QueryResponse
-      - Assert every Citation has non-empty document_name, page_number >= 0,
-        chunk_index >= 0, and non-empty chunk_text
     """
-    # STUB: validates structure
-    mock_citation = {
-        "document_name": "report.pdf",
-        "page_number": 7,
-        "chunk_index": 14,
-        "chunk_text": "Exact text from the source document.",
-        "relevance_score": 0.88,
-    }
-    assert mock_citation["document_name"], "document_name must not be empty"
-    assert mock_citation["page_number"] >= 0, "page_number must be non-negative"
-    assert mock_citation["chunk_index"] >= 0, "chunk_index must be non-negative"
-    assert mock_citation["chunk_text"], "chunk_text must not be empty"
+    from backend.models.schemas import Chunk
+    from backend.services.answer_generator import build_citations
+
+    chunks = [
+        (
+            Chunk(
+                id="cite-1",
+                document_id="cite-doc",
+                document_name="report.pdf",
+                text="Exact text from the source document.",
+                page_number=7,
+                chunk_index=14,
+                token_count=8,
+            ),
+            0.88,
+        ),
+        (
+            Chunk(
+                id="cite-2",
+                document_id="cite-doc",
+                document_name="report.pdf",
+                text="A second verbatim passage.",
+                page_number=8,
+                chunk_index=15,
+                token_count=5,
+            ),
+            0.5,
+        ),
+    ]
+
+    citations = build_citations(chunks)
+
+    assert len(citations) == len(chunks)
+    for citation in citations:
+        assert citation.document_name, "document_name must not be empty"
+        assert citation.page_number >= 0, "page_number must be non-negative"
+        assert citation.chunk_index >= 0, "chunk_index must be non-negative"
+        assert citation.chunk_text, "chunk_text must not be empty"
+        assert 0 <= citation.relevance_score <= 1, "relevance_score must be within [0, 1]"
 
 
 def test_citation_text_is_verbatim():
-    """Citation chunk_text must exactly match the source chunk — no paraphrasing.
+    """Citation chunk_text must exactly match the source chunk — no paraphrasing."""
+    from backend.models.schemas import Chunk
+    from backend.services.answer_generator import build_citations
 
-    Sprint 4 implementation:
-      - Provide known chunks to the answer generator
-      - Parse returned citations
-      - Assert each citation.chunk_text exists verbatim in the provided chunks
-    """
-    # STUB: simulated verbatim check
-    source_chunks = [
-        "The company reported $1.2M revenue in Q3 2025.",
-        "Operating expenses decreased by 15% year-over-year.",
+    chunks = [
+        (
+            Chunk(
+                id="verb-1",
+                document_id="verb-doc",
+                document_name="test.pdf",
+                text="The company reported $1.2M revenue in Q3 2025.",
+                page_number=1,
+                chunk_index=0,
+                token_count=10,
+            ),
+            0.9,
+        ),
+        (
+            Chunk(
+                id="verb-2",
+                document_id="verb-doc",
+                document_name="test.pdf",
+                text="Operating expenses decreased by 15% year-over-year.",
+                page_number=2,
+                chunk_index=1,
+                token_count=8,
+            ),
+            0.7,
+        ),
     ]
-    cited_text = "The company reported $1.2M revenue in Q3 2025."
-    assert cited_text in source_chunks, "Citation must be verbatim from source chunks"
+
+    citations = build_citations(chunks)
+
+    for citation, (chunk, _) in zip(citations, chunks):
+        assert citation.chunk_text == chunk.text, "Citation text must be identical to source chunk text"
 
 
 def test_anti_summary_mandate_in_prompt():
-    """The LLM system prompt must NOT contain 'summarize' and MUST contain
-    anti-summary instructions (CLAUDE.md Rule 5.3).
-
-    Sprint 4 implementation:
-      - Read the actual system prompt string from answer_generator.py
-      - Assert 'summarize' (case-insensitive) does NOT appear
-      - Assert 'VERBATIM' or 'exact text' appears
+    """The LLM system prompt must NOT use 'summarize' outside the anti-summary
+    prohibition clause, and MUST instruct verbatim citation (CLAUDE.md Rule 5.3).
     """
-    # STUB: validates against the canonical prompt from DESIGN.md Section 3.3
-    system_prompt = (
-        "You MUST quote the exact text from the provided chunks. "
-        "Do NOT paraphrase, summarize, or rephrase any cited text."
-    )
-    # The word 'summarize' here is in a PROHIBITION context — that's OK
-    # What we ban is "summarize the following" as an INSTRUCTION
-    assert "quote the exact text" in system_prompt.lower() or "verbatim" in system_prompt.lower(), (
-        "System prompt must instruct verbatim citation"
-    )
+    from backend.services.answer_generator import SYSTEM_PROMPT
+
+    prompt_lower = SYSTEM_PROMPT.lower()
+
+    prohibition_clause = "do not paraphrase, summarize, or rephrase"
+    assert prohibition_clause in prompt_lower, "Anti-summary prohibition clause not found verbatim"
+
+    # 'summarize' may ONLY appear inside the prohibition clause, nowhere else
+    remainder = prompt_lower.replace(prohibition_clause, "")
+    assert "summarize" not in remainder, "'summarize' must not appear outside the prohibition clause"
+
+    assert "verbatim" in prompt_lower, "System prompt must instruct verbatim citation"
+    assert "quote the exact text" in prompt_lower, "System prompt must instruct quoting exact text"
 
 
 def test_irrelevant_query_returns_no_citations():
-    """When max reranker score < 0.3, answer must state 'no relevant information found'.
+    """generate_answer(query, []) must return the fallback string; build_citations([]) must return []."""
+    from backend.services.answer_generator import _NO_CONTEXT_ANSWER, build_citations, generate_answer
 
-    Sprint 4 implementation:
-      - Query with a nonsense question against real documents
-      - Assert response has empty citations list
-      - Assert answer text contains 'no relevant information' or similar
+    answer = generate_answer("What is the meaning of life?", [])
+    citations = build_citations([])
+
+    assert answer == _NO_CONTEXT_ANSWER
+    assert citations == []
+
+
+def test_generate_answer_api_wiring():
+    """generate_answer() must call the Anthropic client with the configured model,
+    the SYSTEM_PROMPT, and a user message containing [Source: ...] formatting.
     """
-    # STUB: validates the expected behavior
-    max_score = 0.15  # Below 0.3 threshold
-    THRESHOLD = 0.3
-    if max_score < THRESHOLD:
-        answer = "No relevant information found in the uploaded documents for this query."
-        citations = []
-    else:
-        answer = "Some answer"
-        citations = [{"chunk_text": "some text"}]
+    from unittest.mock import MagicMock, patch
 
-    assert len(citations) == 0, "Irrelevant query should produce 0 citations"
-    assert "no relevant information" in answer.lower()
+    from backend.config import settings
+    from backend.models.schemas import Chunk
+    from backend.services.answer_generator import SYSTEM_PROMPT, generate_answer
+
+    chunks = [
+        (
+            Chunk(
+                id="wire-1",
+                document_id="wire-doc",
+                document_name="policy.pdf",
+                text="Refunds are processed within 14 business days.",
+                page_number=3,
+                chunk_index=2,
+                token_count=9,
+            ),
+            0.95,
+        ),
+    ]
+
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text="The refund policy states...")]
+
+    with patch(
+        "backend.services.answer_generator._client.messages.create", return_value=mock_response
+    ) as mock_create:
+        answer = generate_answer("What is the refund policy?", chunks)
+
+    assert answer == "The refund policy states..."
+    mock_create.assert_called_once()
+    _, kwargs = mock_create.call_args
+    assert kwargs["model"] == settings.ANTHROPIC_MODEL
+    assert kwargs["system"] == SYSTEM_PROMPT
+    user_content = kwargs["messages"][0]["content"]
+    assert "[Source: policy.pdf, Page 3, Chunk 2]" in user_content, (
+        "User message must include [Source: ...] formatting"
+    )
 
 
 # ===========================================================================
@@ -1091,6 +1164,7 @@ def main() -> int:
         ("citation_text_verbatim", test_citation_text_is_verbatim, "S4"),
         ("anti_summary_in_prompt", test_anti_summary_mandate_in_prompt, "S4"),
         ("irrelevant_query_no_citations", test_irrelevant_query_returns_no_citations, "S4"),
+        ("generate_answer_api_wiring", test_generate_answer_api_wiring, "S4"),
 
         # S5 — API Endpoints
         ("api_upload_endpoint", test_api_upload_endpoint_exists, "S5"),
