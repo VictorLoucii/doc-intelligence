@@ -384,5 +384,42 @@ count documents via `vector_store.document_count()`. Nothing outside
 
 ---
 
+## Decision 18: LLM-Synthesized Insights, Grounded via Chunk-Index References
+
+**Date:** July 2026
+**Status:** Active
+**Decision:** `generate_insights()` sends the LLM a numbered list of chunks and asks
+it to return a JSON array of `{insight_text, suggested_next_question,
+supporting_chunk_ids}` objects, where `supporting_chunk_ids` are indices into the
+list we sent. The service resolves those indices back to the original `Chunk`
+objects and builds `Citation.chunk_text` from `chunk.text` directly — the LLM's
+JSON output is never used as the source of citation text, only as a pointer to
+which chunks support which insight. Insights whose resolved chunks don't span
+≥2 distinct `document_id`s are dropped.
+
+**Reason:**
+- Considered clustering (e.g. embedding similarity clustering across documents)
+  as a non-LLM alternative, but clustering only tells you chunks are *similar*,
+  not *why* — it can't produce a readable insight sentence or a sensible
+  follow-up question without an LLM step anyway, so it would just add
+  complexity without removing the LLM dependency.
+- LLM synthesis is well-suited to prose "themes and connections" framing, but
+  free-text LLM output can't be trusted as a verbatim citation (same risk
+  DESIGN.md flags for `generate_answer()`). Asking the LLM for chunk *indices*
+  rather than chunk *text* keeps the verbatim-citation guarantee structural,
+  extending Decision 15's rule ("build citations from `Chunk` objects, never
+  parsed from LLM output") to this new code path instead of writing a
+  separate, weaker rule for it.
+- The system prompt for insights is deliberately distinct from `answer_generator.SYSTEM_PROMPT`
+  (CLAUDE.md Section 5.3) — it authorizes commentary/theme synthesis, which the
+  anti-summary answer prompt intentionally forbids. Reusing that prompt verbatim
+  would be internally contradictory.
+- The ≥2-distinct-document check is enforced twice: once as an early exit for the
+  full `chunks` input (avoids an LLM call when the corpus can't produce a
+  cross-document insight), and once per-insight after resolving `supporting_chunk_ids`
+  (guards against the LLM citing 2+ chunks that happen to share one document).
+
+---
+
 *Last updated: July 2026*
 *Update this file whenever a new significant decision is made during the build.*

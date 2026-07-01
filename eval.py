@@ -1191,6 +1191,111 @@ def test_edge_case_duplicate_upload_idempotent():
 
 
 # ===========================================================================
+#  SECTION 8 — INSIGHT ENGINE (Sprint S7)
+#  Tests for cross-document insight synthesis: schema compliance, verbatim
+#  citations built from Chunk fields, and the <2-document short-circuit.
+# ===========================================================================
+
+def test_insight_engine_requires_two_documents():
+    """generate_insights() must return [] when fewer than 2 distinct document_ids are present."""
+    from backend.models.schemas import Chunk
+    from backend.services.insight_engine import generate_insights
+
+    chunks = [
+        Chunk(
+            id=f"single-doc-{i}",
+            document_id="only-doc",
+            document_name="solo.pdf",
+            text=f"Sentence number {i} from the only uploaded document.",
+            page_number=1,
+            chunk_index=i,
+            token_count=8,
+        )
+        for i in range(3)
+    ]
+
+    assert generate_insights(chunks) == []
+
+
+def test_insight_engine_generates_insights():
+    """generate_insights() must call the Anthropic client and build verbatim, schema-valid insights.
+
+    Citations must be built from the source Chunk objects — never from the LLM's JSON text —
+    matching the Decision 15 rule for build_citations().
+    """
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from backend.models.schemas import Chunk, InsightSuggestion
+    from backend.services.insight_engine import generate_insights
+
+    chunks = [
+        Chunk(
+            id="ins-a-0",
+            document_id="doc-a",
+            document_name="q3_report.pdf",
+            text="Revenue grew 12% in Q3 driven by new enterprise contracts.",
+            page_number=4,
+            chunk_index=0,
+            token_count=12,
+        ),
+        Chunk(
+            id="ins-a-1",
+            document_id="doc-a",
+            document_name="q3_report.pdf",
+            text="Operating costs remained flat quarter over quarter.",
+            page_number=5,
+            chunk_index=1,
+            token_count=8,
+        ),
+        Chunk(
+            id="ins-b-0",
+            document_id="doc-b",
+            document_name="board_minutes.pdf",
+            text="The board noted enterprise contract growth as the primary driver of Q3 results.",
+            page_number=2,
+            chunk_index=0,
+            token_count=13,
+        ),
+    ]
+
+    mock_insight = {
+        "insight_text": "Both the Q3 report and board minutes attribute growth to new enterprise contracts.",
+        "suggested_next_question": "Which enterprise contracts contributed most to Q3 revenue growth?",
+        "supporting_chunk_ids": [0, 2],
+    }
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text=json.dumps([mock_insight]))]
+
+    with patch(
+        "backend.services.insight_engine._client.messages.create", return_value=mock_response
+    ) as mock_create:
+        results = generate_insights(chunks, top_n=3)
+
+    mock_create.assert_called_once()
+
+    assert len(results) == 1
+    insight = results[0]
+    InsightSuggestion.model_validate(insight.model_dump())  # schema validation passes
+
+    assert insight.insight_text == mock_insight["insight_text"]
+    assert insight.suggested_next_question == mock_insight["suggested_next_question"]
+    assert len(insight.supporting_chunks) > 0, "supporting_chunks must be non-empty"
+
+    source_by_page_index = {(c.page_number, c.chunk_index): c.text for c in chunks}
+    for citation in insight.supporting_chunks:
+        key = (citation.page_number, citation.chunk_index)
+        assert citation.chunk_text == source_by_page_index[key], (
+            "Citation chunk_text must match the source Chunk.text verbatim"
+        )
+
+    cited_document_ids = {
+        chunks[i].document_id for i in mock_insight["supporting_chunk_ids"]
+    }
+    assert len(cited_document_ids) >= 2, "Insight must be grounded in >=2 distinct documents"
+
+
+# ===========================================================================
 #  MAIN — Test execution and Logic Score output
 # ===========================================================================
 
@@ -1256,6 +1361,10 @@ def main() -> int:
         ("edge_password_protected_pdf", test_edge_case_password_protected_pdf, "S6"),
         ("edge_malformed_query", test_edge_case_malformed_query, "S6"),
         ("edge_duplicate_upload_idempotent", test_edge_case_duplicate_upload_idempotent, "S6"),
+
+        # S7 — Insight Engine
+        ("insight_engine_requires_two_documents", test_insight_engine_requires_two_documents, "S7"),
+        ("insight_engine_generates_insights", test_insight_engine_generates_insights, "S7"),
     ]
 
     # Apply keyword filter
