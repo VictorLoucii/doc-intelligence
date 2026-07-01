@@ -1,12 +1,12 @@
-"""POST /query, POST /insights. Logic added in S5."""
+"""POST /query, POST /insights. Query logic added in S5; insights logic added in S7."""
 
 import logging
 import time
 
 from fastapi import APIRouter, HTTPException
 
-from backend.models.schemas import QueryRequest, QueryResponse
-from backend.services import answer_generator, embedding_service, reranker, vector_store
+from backend.models.schemas import InsightSuggestion, QueryRequest, QueryResponse
+from backend.services import answer_generator, embedding_service, insight_engine, reranker, vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -39,3 +39,12 @@ async def query_documents(request: QueryRequest) -> QueryResponse:
         chunks_evaluated=len(candidates),
         processing_time_ms=processing_time_ms,
     )
+
+
+@router.post("/insights", response_model=list[InsightSuggestion])
+async def get_insights() -> list[InsightSuggestion]:
+    if vector_store.is_empty():
+        raise HTTPException(status_code=400, detail="Please upload at least one document before asking questions.")
+
+    chunks = vector_store.all_chunks()
+    return insight_engine.generate_insights(chunks)

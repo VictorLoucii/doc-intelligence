@@ -382,6 +382,9 @@ count documents via `vector_store.document_count()`. Nothing outside
 - A small accessor surface keeps the "vector store is append-only during queries"
   rule (CLAUDE.md Section 5.9) enforceable in one file instead of scattered checks.
 
+**Update (S7 T2):** `all_chunks()` extends this same accessor surface — it returns a
+read-only `list[Chunk]` snapshot for `/insights`, without exposing `_chunks_by_id` itself.
+
 ---
 
 ## Decision 18: LLM-Synthesized Insights, Grounded via Chunk-Index References

@@ -59,6 +59,11 @@ def is_empty() -> bool:
     return _index.ntotal == 0
 
 
+def all_chunks() -> list[Chunk]:
+    """Return every chunk currently indexed, across all documents. Read-only (Decision 17)."""
+    return list(_chunks_by_id.values())
+
+
 def document_count() -> int:
     """Count of distinct documents represented in the index."""
     return len({chunk.document_id for chunk in _chunks_by_id.values()})

@@ -1196,6 +1196,95 @@ def test_edge_case_duplicate_upload_idempotent():
 #  citations built from Chunk fields, and the <2-document short-circuit.
 # ===========================================================================
 
+def test_api_insights_before_upload_returns_400():
+    """POST /insights before any document upload must return HTTP 400 (same message as /query).
+
+    Must run before the other insights API tests below, which upload documents — by this
+    point in the suite, all earlier S5/S6 upload tests have deleted their documents in
+    `finally` blocks, so the vector store is back to empty.
+    """
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+
+    client = TestClient(app)
+    response = client.post("/insights")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Please upload at least one document before asking questions."
+
+
+def test_api_insights_single_document_returns_empty_list():
+    """POST /insights with only one document indexed must return 200 with []."""
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+
+    client = TestClient(app)
+    document_id = None
+    try:
+        upload_response = client.post(
+            "/upload", files={"files": ("insights_single.pdf", _make_pdf_bytes(), "application/pdf")}
+        )
+        document_id = upload_response.json()[0]["metadata"]["id"]
+
+        response = client.post("/insights")
+        assert response.status_code == 200
+        assert response.json() == []
+    finally:
+        if document_id:
+            client.delete(f"/documents/{document_id}")
+
+
+def test_api_insights_multi_document_returns_valid_insights():
+    """POST /insights with >=2 documents must call generate_insights() and return a valid list."""
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+    from backend.models.schemas import InsightSuggestion
+    from backend.services import vector_store as vs
+
+    client = TestClient(app)
+    document_ids = []
+    try:
+        for filename, sentence in (
+            ("insights_multi_1.pdf", "Alpha sentence for the insights endpoint test. "),
+            ("insights_multi_2.pdf", "Beta sentence for the insights endpoint test. "),
+        ):
+            response = client.post(
+                "/upload", files={"files": (filename, _make_pdf_bytes(sentence), "application/pdf")}
+            )
+            document_ids.append(response.json()[0]["metadata"]["id"])
+
+        chunks = vs.all_chunks()
+        first_document_id = chunks[0].document_id
+        other_index = next(i for i, c in enumerate(chunks) if c.document_id != first_document_id)
+
+        mock_insight = {
+            "insight_text": "Both uploaded documents contain related sentence content.",
+            "suggested_next_question": "How do these two documents relate to each other?",
+            "supporting_chunk_ids": [0, other_index],
+        }
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text=json.dumps([mock_insight]))]
+
+        with patch(
+            "backend.services.insight_engine._client.messages.create", return_value=mock_response
+        ) as mock_create:
+            response = client.post("/insights")
+
+        mock_create.assert_called_once()
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body) == 1
+        InsightSuggestion.model_validate(body[0])
+    finally:
+        for document_id in document_ids:
+            client.delete(f"/documents/{document_id}")
+
+
 def test_insight_engine_requires_two_documents():
     """generate_insights() must return [] when fewer than 2 distinct document_ids are present."""
     from backend.models.schemas import Chunk
@@ -1363,6 +1452,11 @@ def main() -> int:
         ("edge_duplicate_upload_idempotent", test_edge_case_duplicate_upload_idempotent, "S6"),
 
         # S7 — Insight Engine
+        # api_insights_before_upload_400 MUST run first among these: it asserts the
+        # pre-upload 400 state, before the other insights tests upload documents.
+        ("api_insights_before_upload_400", test_api_insights_before_upload_returns_400, "S7"),
+        ("api_insights_single_document", test_api_insights_single_document_returns_empty_list, "S7"),
+        ("api_insights_multi_document", test_api_insights_multi_document_returns_valid_insights, "S7"),
         ("insight_engine_requires_two_documents", test_insight_engine_requires_two_documents, "S7"),
         ("insight_engine_generates_insights", test_insight_engine_generates_insights, "S7"),
     ]
