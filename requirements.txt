@@ -1,0 +1,46 @@
+# =============================================================================
+# N-ERGY Document Intelligence System — Python Dependencies
+# =============================================================================
+# Pinned to stable, mutually-compatible versions.
+# Target: Python 3.11+ on AWS EC2 (Ubuntu) with 4× NVIDIA A10 GPUs.
+#
+# Install: pip install -r requirements.txt
+# GPU note: faiss-gpu and torch must match the system's CUDA version.
+#           If CUDA 12.x is present, torch will auto-select the right wheel.
+#           If faiss-gpu fails, fall back to faiss-cpu (retrieval still works).
+# =============================================================================
+
+# --- Layer 2: Backend Framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.18          # Required by FastAPI for file uploads (UploadFile)
+pydantic==2.10.4
+pydantic-settings==2.7.1          # backend/config.py — env var loading
+
+# --- Layer 1: PDF Extraction ---
+PyMuPDF==1.25.3                   # fitz — fast PDF text extraction (Decision 6)
+
+# --- Layer 1: Chunking ---
+langchain-text-splitters==0.3.4   # RecursiveCharacterTextSplitter (chunk_size=1000, overlap=200)
+
+# --- Layer 1: Embedding & Reranking (GPU) ---
+torch==2.5.1                      # PyTorch — backbone for sentence-transformers & cross-encoder
+sentence-transformers==3.3.1      # BAAI/bge-large-en-v1.5 (GPU 0) + cross-encoder/ms-marco (GPU 1)
+transformers==4.47.1              # HuggingFace model loading (transitive, pinned for stability)
+tokenizers==0.21.0                # Fast tokenizer backend (transitive, pinned)
+
+# --- Layer 1: Vector Store ---
+faiss-cpu==1.9.0.post1            # FAISS — in-memory ANN search (Decision 4)
+                                  # Use faiss-gpu==1.7.2 if CUDA toolkit is available and
+                                  # GPU-accelerated search is needed. faiss-cpu is the safe default.
+numpy==1.26.4                     # FAISS and torch interop — pinned below 2.0 for compat
+
+# --- Layer 1: LLM Answer Generation ---
+anthropic==0.40.0                 # Claude API SDK — primary LLM (DESIGN.md Section 4 Layer 1)
+                                  # If Claude API key unavailable on EC2, fallback to local LLM via vLLM.
+                                  # vLLM is NOT listed here — install separately if needed:
+                                  #   pip install vllm (requires separate CUDA wheel)
+
+# --- Utilities ---
+python-dotenv==1.0.1              # .env file loading for local dev (never in production)
+httpx==0.28.1                     # Async HTTP client (used by anthropic SDK, also useful for testing)
