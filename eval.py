@@ -727,13 +727,78 @@ def test_reranker_improves_precision():
       - Get reranker top-5 (from cross-encoder on FAISS top-50)
       - Assert reranker precision@5 >= bi-encoder precision@5
     """
-    # STUB: simulated precision values
-    biencoder_precision_at_5 = 0.60
-    reranker_precision_at_5 = 0.80
-    assert reranker_precision_at_5 >= biencoder_precision_at_5, (
-        f"Reranker precision ({reranker_precision_at_5}) must beat "
-        f"bi-encoder precision ({biencoder_precision_at_5})"
-    )
+    from backend.models.schemas import Chunk
+    from backend.services import embedding_service, vector_store as vs
+    from backend.services.reranker import rerank
+
+    query = "What are the payment terms for invoices?"
+
+    # 5 genuinely relevant chunks.
+    relevant_texts = [
+        "Invoice payment terms require full payment within 30 days of the invoice date.",
+        "Payment for all invoices is due net 30 days from the invoice issue date.",
+        "Customers must pay invoices within a 30-day payment term as specified in the contract.",
+        "Late payment on invoices incurs a 1.5% monthly interest fee after the 30-day term.",
+        "Invoices are payable within 30 days; early payment discounts of 2% apply within 10 days.",
+    ]
+    # Near-miss decoys: share surface wording ("invoice", "payment", "30-day", "terms")
+    # with the query but answer a different actual question, so bi-encoder cosine
+    # similarity is fooled while cross-encoder attention should correctly demote them.
+    decoy_texts = [
+        "The vendor invoice must include a purchase order number and delivery terms for the shipped goods.",
+        "Employees must submit expense reports within 30 days of the travel date to receive reimbursement.",
+        "The service agreement terms require a 30-day notice period before contract termination.",
+        "Software license payment is due annually, with renewal terms set every 12 months.",
+    ]
+
+    chunks = [
+        Chunk(
+            id=f"prec-rel-{i}",
+            document_id="prec-doc",
+            document_name="test.pdf",
+            text=text,
+            page_number=1,
+            chunk_index=i,
+            token_count=15,
+        )
+        for i, text in enumerate(relevant_texts)
+    ] + [
+        Chunk(
+            id=f"prec-decoy-{i}",
+            document_id="prec-doc",
+            document_name="test.pdf",
+            text=text,
+            page_number=1,
+            chunk_index=100 + i,
+            token_count=15,
+        )
+        for i, text in enumerate(decoy_texts)
+    ]
+    relevant_ids = {chunk.id for chunk in chunks[: len(relevant_texts)]}
+
+    try:
+        embeddings = embedding_service.embed_chunks(chunks)
+        vs.add_chunks(chunks, embeddings)
+
+        query_vec = embedding_service.embed_query(query)
+
+        biencoder_top5 = vs.search(query_vec, top_k=5)
+        biencoder_precision_at_5 = sum(1 for chunk, _ in biencoder_top5 if chunk.id in relevant_ids) / 5
+
+        candidates_top50 = vs.search(query_vec, top_k=50)
+        reranker_top5 = rerank(query, candidates_top50, top_k=5)
+        reranker_precision_at_5 = sum(1 for chunk, _ in reranker_top5 if chunk.id in relevant_ids) / 5
+
+        assert reranker_precision_at_5 >= biencoder_precision_at_5, (
+            f"Reranker precision ({reranker_precision_at_5}) must beat "
+            f"bi-encoder precision ({biencoder_precision_at_5})"
+        )
+        assert reranker_precision_at_5 > biencoder_precision_at_5, (
+            "Decoys are crafted to fool the bi-encoder only — reranker precision "
+            "must be strictly greater on this fixture"
+        )
+    finally:
+        vs.delete_document("prec-doc")  # keep the module-level index clean for other tests
 
 
 def test_reranker_relevance_threshold():
