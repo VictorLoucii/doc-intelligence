@@ -54,6 +54,16 @@ def search(query_embedding: np.ndarray, top_k: int = 50) -> list[tuple[Chunk, fl
     return results
 
 
+def is_empty() -> bool:
+    """True if the index has no vectors."""
+    return _index.ntotal == 0
+
+
+def document_count() -> int:
+    """Count of distinct documents represented in the index."""
+    return len({chunk.document_id for chunk in _chunks_by_id.values()})
+
+
 def delete_document(document_id: str) -> None:
     """Remove all chunks for a document by rebuilding the index from the rest."""
     global _index, _next_id
