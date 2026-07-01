@@ -420,20 +420,49 @@ def test_extraction_empty_pdf_returns_structured_error():
 
 
 def test_ingestion_chunking_parameters():
-    """Chunks must respect chunk_size=1000, chunk_overlap=200, no empty chunks.
-
-    Sprint 1 implementation:
-      - Process a known PDF with measurable text
-      - Assert max chunk token count <= 1000 (with some tolerance for splitter)
-      - Assert overlap region exists between consecutive chunks
-      - Assert no chunk has empty text
+    """Chunks must respect chunk_size=1000, chunk_overlap=200, no empty chunks
+    (Sprint 1, Task 2 — real chunk_pages() implementation).
     """
-    # STUB: passes trivially — validates chunking config constants
-    CHUNK_SIZE = 1000
-    CHUNK_OVERLAP = 200
+    from backend.models.schemas import PageText
+    from backend.services.pdf_processor import (
+        CHUNK_OVERLAP,
+        CHUNK_SIZE,
+        chunk_pages,
+        _get_tokenizer,
+    )
+
     assert CHUNK_SIZE == 1000, f"Expected 1000, got {CHUNK_SIZE}"
     assert CHUNK_OVERLAP == 200, f"Expected 200, got {CHUNK_OVERLAP}"
     assert CHUNK_OVERLAP < CHUNK_SIZE, "Overlap must be less than chunk size"
+
+    paragraph = "This is a sentence about revenue and operations. " * 40
+    pages = [
+        PageText(page_number=1, text=paragraph * 3),
+        PageText(page_number=2, text=paragraph * 3),
+    ]
+
+    chunks = chunk_pages(pages, document_id="doc-1", document_name="test.pdf")
+
+    assert len(chunks) > 1, "Multi-page long text should split into multiple chunks"
+
+    tokenizer = _get_tokenizer()
+    for chunk in chunks:
+        assert chunk.text.strip(), "No chunk may be empty/whitespace-only"
+        assert chunk.token_count <= CHUNK_SIZE + 50, "Chunk exceeds token budget (tolerance for splitter)"
+        assert chunk.token_count == len(tokenizer.encode(chunk.text, add_special_tokens=False))
+        assert chunk.document_id == "doc-1"
+        assert chunk.document_name == "test.pdf"
+        assert chunk.page_number in (1, 2)
+
+    # chunk_index must be sequential across the whole document
+    assert [c.chunk_index for c in chunks] == list(range(len(chunks)))
+
+    # Overlap: consecutive chunks should share trailing/leading text
+    overlap_found = any(
+        chunks[i].text[-30:] in chunks[i + 1].text or chunks[i + 1].text[:30] in chunks[i].text
+        for i in range(len(chunks) - 1)
+    )
+    assert overlap_found, "Expected overlap between at least one pair of consecutive chunks"
 
 
 # ===========================================================================
