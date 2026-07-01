@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # --- API keys ---
     ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-sonnet-5"
 
     # --- Logging ---
     LOG_LEVEL: str = "INFO"
