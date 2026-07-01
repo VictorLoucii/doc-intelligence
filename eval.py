@@ -1142,21 +1142,18 @@ def test_edge_case_password_protected_pdf():
 
 
 def test_edge_case_malformed_query():
-    """Empty or too-long question must be rejected by Pydantic validation.
+    """Empty or too-long question must be rejected by Pydantic validation."""
+    from fastapi.testclient import TestClient
 
-    Sprint 6 implementation:
-      - POST /query with {"question": ""}
-      - Assert HTTP 422
-      - POST /query with {"question": "x" * 2001}
-      - Assert HTTP 422
-    """
-    # STUB: validates boundary values
-    MIN_LEN = 1
-    MAX_LEN = 2000
-    assert MIN_LEN == 1
-    assert MAX_LEN == 2000
-    assert len("") < MIN_LEN, "Empty string must fail validation"
-    assert len("x" * 2001) > MAX_LEN, "2001-char string must fail validation"
+    from backend.main import app
+
+    client = TestClient(app)
+
+    response = client.post("/query", json={"question": "", "top_k": 5})
+    assert response.status_code == 422
+
+    response = client.post("/query", json={"question": "x" * 2001, "top_k": 5})
+    assert response.status_code == 422
 
 
 def test_edge_case_duplicate_upload_idempotent():
