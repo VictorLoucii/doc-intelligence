@@ -5,7 +5,7 @@ import logging
 import anthropic
 
 from backend.config import settings
-from backend.models.schemas import Chunk
+from backend.models.schemas import Chunk, Citation
 
 logger = logging.getLogger(__name__)
 
@@ -48,3 +48,17 @@ def generate_answer(query: str, chunks: list[tuple[Chunk, float]]) -> str:
         messages=[{"role": "user", "content": user_message}],
     )
     return response.content[0].text
+
+
+def build_citations(chunks: list[tuple[Chunk, float]]) -> list[Citation]:
+    """Build verbatim Citations directly from `Chunk` objects — never from `generate_answer()`'s output."""
+    return [
+        Citation(
+            document_name=chunk.document_name,
+            page_number=chunk.page_number,
+            chunk_index=chunk.chunk_index,
+            chunk_text=chunk.text,
+            relevance_score=score,
+        )
+        for chunk, score in chunks
+    ]

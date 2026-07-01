@@ -333,5 +333,24 @@ bounded, which is sufficient for thresholding and citation display.
 
 ---
 
+## Decision 15: Build Citations from `Chunk` Objects, Never Parsed from LLM Output
+
+**Date:** July 2026
+**Status:** Active
+**Decision:** `build_citations()` constructs each `Citation` directly from the
+`(Chunk, score)` pairs returned by the reranker — `chunk_text` is `chunk.text`,
+copied verbatim. It never parses or extracts quoted text out of `generate_answer()`'s
+LLM output.
+
+**Reason:**
+- Parsing quotes out of LLM-generated text risks the model paraphrasing mid-generation
+  despite the system prompt's verbatim instruction (CLAUDE.md Section 5.3) — a prompt
+  is a request, not a guarantee.
+- Building citations from `Chunk` fields makes the verbatim guarantee structural
+  (the text is never touched by the LLM) rather than dependent on the model reliably
+  following instructions.
+
+---
+
 *Last updated: July 2026*
 *Update this file whenever a new significant decision is made during the build.*
