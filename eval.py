@@ -1012,54 +1012,105 @@ def test_generate_answer_api_wiring():
 #  Tests for FastAPI router responses, HTTP status codes, and schema compliance.
 # ===========================================================================
 
-def test_api_upload_endpoint_exists():
-    """POST /upload must accept multipart file upload.
+def _make_pdf_bytes(sentence: str = "Real extractable sentence for eval.py. ", repeats: int = 20) -> bytes:
+    """Build an in-memory single-page PDF with extractable text (shared by S5 API tests)."""
+    import fitz
 
-    Sprint 5 implementation:
-      - Use httpx.AsyncClient with FastAPI TestClient
-      - POST a PDF file to /upload
-      - Assert 200 response with DocumentMetadata JSON
-    """
-    # STUB: validates route name constant
-    UPLOAD_ROUTE = "/upload"
-    assert UPLOAD_ROUTE == "/upload"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), sentence * repeats)
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def test_api_upload_endpoint_exists():
+    """POST /upload must accept multipart file upload and return ProcessPDFResult JSON."""
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+
+    client = TestClient(app)
+    document_id = None
+    try:
+        response = client.post(
+            "/upload", files={"files": ("upload_test.pdf", _make_pdf_bytes(), "application/pdf")}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body[0]["success"] is True
+        assert body[0]["metadata"]["page_count"] > 0
+        document_id = body[0]["metadata"]["id"]
+    finally:
+        if document_id:
+            client.delete(f"/documents/{document_id}")
 
 
 def test_api_query_endpoint_exists():
-    """POST /query must accept QueryRequest JSON and return QueryResponse.
+    """POST /query must accept QueryRequest JSON and return a QueryResponse-shaped body."""
+    from unittest.mock import MagicMock, patch
 
-    Sprint 5 implementation:
-      - POST JSON {"question": "...", "top_k": 5} to /query
-      - Assert 200 response
-      - Assert response body validates as QueryResponse
-    """
-    QUERY_ROUTE = "/query"
-    assert QUERY_ROUTE == "/query"
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+    from backend.models.schemas import QueryResponse
+
+    client = TestClient(app)
+    document_id = None
+    try:
+        upload_response = client.post(
+            "/upload", files={"files": ("query_test.pdf", _make_pdf_bytes(), "application/pdf")}
+        )
+        document_id = upload_response.json()[0]["metadata"]["id"]
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="The document says so.")]
+        with patch(
+            "backend.services.answer_generator._client.messages.create", return_value=mock_response
+        ):
+            response = client.post("/query", json={"question": "What does the document say?", "top_k": 5})
+
+        assert response.status_code == 200
+        QueryResponse.model_validate(response.json())
+    finally:
+        if document_id:
+            client.delete(f"/documents/{document_id}")
 
 
 def test_api_documents_list_endpoint():
-    """GET /documents must return list of uploaded DocumentMetadata.
+    """GET /documents must return the list of uploaded DocumentMetadata."""
+    from fastapi.testclient import TestClient
 
-    Sprint 5 implementation:
-      - Upload 2 PDFs
-      - GET /documents
-      - Assert response is a list of length 2
-    """
-    DOCUMENTS_ROUTE = "/documents"
-    assert DOCUMENTS_ROUTE == "/documents"
+    from backend.main import app
+
+    client = TestClient(app)
+    document_ids = []
+    try:
+        for filename in ("list_test_1.pdf", "list_test_2.pdf"):
+            response = client.post("/upload", files={"files": (filename, _make_pdf_bytes(), "application/pdf")})
+            document_ids.append(response.json()[0]["metadata"]["id"])
+
+        response = client.get("/documents")
+        assert response.status_code == 200
+        assert len(response.json()) == 2
+    finally:
+        for document_id in document_ids:
+            client.delete(f"/documents/{document_id}")
 
 
 def test_api_query_before_upload_returns_400():
     """Querying before any document upload must return HTTP 400.
 
-    Sprint 5 implementation:
-      - Fresh app state (no uploads)
-      - POST /query
-      - Assert HTTP 400 with descriptive error message
+    Must run before any other S5 test uploads — vector_store/documents._documents
+    are process-wide singletons shared across the whole eval.py run.
     """
-    # STUB: validates expected status code
-    expected_status = 400
-    assert expected_status == 400
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+
+    client = TestClient(app)
+    response = client.post("/query", json={"question": "Anything?", "top_k": 5})
+    assert response.status_code == 400
 
 
 # ===========================================================================
@@ -1167,10 +1218,12 @@ def main() -> int:
         ("generate_answer_api_wiring", test_generate_answer_api_wiring, "S4"),
 
         # S5 — API Endpoints
+        # api_query_before_upload_400 MUST run first: vector_store/documents._documents
+        # are process-wide singletons, and this test asserts the pre-upload 400 state.
+        ("api_query_before_upload_400", test_api_query_before_upload_returns_400, "S5"),
         ("api_upload_endpoint", test_api_upload_endpoint_exists, "S5"),
         ("api_query_endpoint", test_api_query_endpoint_exists, "S5"),
         ("api_documents_list", test_api_documents_list_endpoint, "S5"),
-        ("api_query_before_upload_400", test_api_query_before_upload_returns_400, "S5"),
 
         # S6 — Edge Cases
         ("edge_password_protected_pdf", test_edge_case_password_protected_pdf, "S6"),

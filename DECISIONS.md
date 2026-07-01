@@ -352,5 +352,37 @@ LLM output.
 
 ---
 
+## Decision 16: `/upload` Always Returns HTTP 200 with `list[ProcessPDFResult]`
+
+**Date:** July 2026
+**Status:** Active
+**Decision:** `POST /upload` always responds `200` with a `list[ProcessPDFResult]`,
+one entry per uploaded file, even when some files fail. Per-file success/failure is
+carried in `ProcessPDFResult.success`/`error_type`, not in the HTTP status code.
+
+**Reason:**
+- CLAUDE.md Section 5.7 requires that one bad file in a batch never fails the rest —
+  an HTTP error status for the whole request would force the frontend to choose
+  between "fail everything" or reparsing a mixed-result body against an error code.
+- A uniform `200` with per-file results lets the caller iterate the list and render
+  successes and failures independently, which is what the frontend already does.
+
+## Decision 17: `vector_store.is_empty()` / `document_count()` Wrap Private State
+
+**Date:** July 2026
+**Status:** Active
+**Decision:** Callers (routers) check emptiness via `vector_store.is_empty()` and
+count documents via `vector_store.document_count()`. Nothing outside
+`vector_store.py` reads `_index.ntotal` or `_chunks_by_id` directly.
+
+**Reason:**
+- `_index` and `_chunks_by_id` are module-private implementation details (currently
+  a FAISS `IndexIDMap2` plus a dict); routers depending on `_index.ntotal` directly
+  would break if the index type or internal bookkeeping ever changes.
+- A small accessor surface keeps the "vector store is append-only during queries"
+  rule (CLAUDE.md Section 5.9) enforceable in one file instead of scattered checks.
+
+---
+
 *Last updated: July 2026*
 *Update this file whenever a new significant decision is made during the build.*

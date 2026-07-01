@@ -269,7 +269,7 @@ class InsightSuggestion(BaseModel):
 | **Corrupted PDF** | `fitz.open()` raises exception | Catch `fitz.FileDataError`. Log error. Skip file. Continue processing remaining PDFs. | 422 |
 | **Password-protected PDF** | `fitz.open()` raises encryption error | Return error: "PDF is password-protected. Please upload an unlocked version." | 422 |
 | **Irrelevant query** | Max cross-encoder score < 0.3 threshold | Return: "No relevant information found in the uploaded documents for this query." | 200 (with empty citations) |
-| **Query before any upload** | `vector_store.ntotal == 0` | Return error: "Please upload at least one document before asking questions." | 400 |
+| **Query before any upload** | `vector_store.is_empty()` | Return error: "Please upload at least one document before asking questions." | 400 |
 | **Duplicate PDF upload** | SHA-256 hash already in metadata store | Skip re-processing. Return existing document metadata. | 200 (idempotent) |
 | **Very long PDF** (500+ pages) | `doc.page_count > 500` | Process all pages. Log warning. No artificial limit. Chunking handles size naturally. | 200 |
 | **Non-English PDF** | Not detected at upload | BGE model handles English well. Non-English recall may degrade. Document in README as limitation. | 200 |
