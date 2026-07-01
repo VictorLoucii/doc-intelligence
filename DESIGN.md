@@ -389,7 +389,7 @@ doc-intelligence/
 | **4:00–5:15** | S4: Answer Generation | `answer_generator.py`: LLM prompt with anti-summary mandate. Verbatim citations with source/page/chunk. | `python eval.py` — citation format correct, text is verbatim from source |
 | **5:15–6:15** | S5: FastAPI + Frontend | Routers: `/upload`, `/documents`, `/query`. Frontend: HTML upload + question + answer display. | Manual browser test: upload PDF → ask question → see answer with citations |
 | **6:15–7:00** | S6: Edge Cases + Polish | Empty PDF handling, irrelevant query detection, error messages, logging. | `python eval.py` — all edge case tests pass |
-| **7:00–7:30** | S7: Bonus — Insight Engine | `insight_engine.py`: Cross-document theme detection, suggested follow-up questions. | Best-effort. Skip if behind schedule. |
+| **7:00–7:30** | S7: Insight Engine | `insight_engine.py`: Cross-document theme detection, suggested follow-up questions. | `python eval.py` — insight engine tests pass |
 | **7:30–8:00** | S8: README + Final Push | Write README (architecture, decisions, tradeoffs, scale analysis). Final eval run. Git push. | `python eval.py` — 100% Logic Score. README covers all required sections. `git push` succeeds. |
 
 ---
