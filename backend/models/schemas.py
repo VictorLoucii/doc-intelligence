@@ -17,6 +17,32 @@ class ProcessingStatus(str, Enum):
     FAILED = "failed"
 
 
+class ExtractionErrorType(str, Enum):
+    EMPTY = "empty"
+    CORRUPTED = "corrupted"
+    PASSWORD_PROTECTED = "password_protected"
+
+
+class PageText(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_number: int = Field(..., description="1-indexed page number")
+    text: str
+
+
+class PDFExtractionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool
+    pages: list[PageText] = Field(default_factory=list)
+    sha256: str | None = Field(default=None, description="SHA-256 of raw file bytes (Decision 12)")
+    file_size_bytes: int | None = None
+    page_count: int | None = None
+    error_type: ExtractionErrorType | None = None
+    error_message: str | None = None
+    warning: str | None = Field(default=None, description="Non-fatal issue, e.g. scanned/image-only PDF")
+
+
 class DocumentMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

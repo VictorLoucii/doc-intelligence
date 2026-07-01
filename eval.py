@@ -379,6 +379,46 @@ def test_ingestion_sha256_dedup_skips_duplicate():
     assert first_hash == second_hash, "Same file should produce same hash"
 
 
+def test_extraction_valid_pdf_returns_pages():
+    """extract_pdf_text() must return per-page text for a valid PDF (Sprint 1, Task 1).
+
+    Real implementation (Task 1 — extraction only, no chunking/metadata yet):
+      - Build a minimal in-memory PDF with fitz
+      - Call pdf_processor.extract_pdf_text()
+      - Assert success=True, correct page_count, sha256 present
+    """
+    import fitz
+    from backend.services.pdf_processor import extract_pdf_text
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Real extractable sentence for eval.py.")
+    data = doc.tobytes()
+    doc.close()
+
+    result = extract_pdf_text(data)
+    assert result.success is True
+    assert result.page_count == 1
+    assert len(result.pages) == 1
+    assert result.sha256 and len(result.sha256) == 64
+
+
+def test_extraction_empty_pdf_returns_structured_error():
+    """extract_pdf_text() must flag an all-blank PDF as EMPTY, not raise (Sprint 1, Task 1)."""
+    import fitz
+    from backend.models.schemas import ExtractionErrorType
+    from backend.services.pdf_processor import extract_pdf_text
+
+    doc = fitz.open()
+    doc.new_page()
+    data = doc.tobytes()
+    doc.close()
+
+    result = extract_pdf_text(data)
+    assert result.success is False
+    assert result.error_type == ExtractionErrorType.EMPTY
+
+
 def test_ingestion_chunking_parameters():
     """Chunks must respect chunk_size=1000, chunk_overlap=200, no empty chunks.
 
@@ -762,6 +802,8 @@ def main() -> int:
         ("ingest_empty_pdf_error", test_ingestion_empty_pdf_returns_error, "S1"),
         ("ingest_corrupted_pdf_resilience", test_ingestion_corrupted_pdf_does_not_crash, "S1"),
         ("ingest_sha256_dedup", test_ingestion_sha256_dedup_skips_duplicate, "S1"),
+        ("extraction_valid_pdf_pages", test_extraction_valid_pdf_returns_pages, "S1"),
+        ("extraction_empty_pdf_error", test_extraction_empty_pdf_returns_structured_error, "S1"),
         ("ingest_chunking_params", test_ingestion_chunking_parameters, "S1"),
 
         # S2 — Embedding + Vector Store
