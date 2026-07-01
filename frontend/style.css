@@ -1,1 +1,23 @@
-/* Placeholder — built out in S5. Function over form. */
+body {
+  font-family: sans-serif;
+  max-width: 800px;
+  margin: 2em auto;
+}
+
+.citation-card {
+  border: 1px solid #ccc;
+  padding: 0.5em;
+  margin: 0.5em 0;
+}
+
+.citation-card pre {
+  white-space: pre-wrap;
+}
+
+.upload-result {
+  margin: 0.25em 0;
+}
+
+#query-error {
+  color: red;
+}

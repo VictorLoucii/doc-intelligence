@@ -7,7 +7,27 @@
 </head>
 <body>
   <h1>N-ERGY Document Intelligence System</h1>
-  <p>Placeholder — built out in S5.</p>
+
+  <section>
+    <h2>Upload PDFs</h2>
+    <form id="upload-form">
+      <input type="file" name="files" multiple accept="application/pdf">
+      <button type="submit">Upload</button>
+    </form>
+    <div id="upload-results"></div>
+  </section>
+
+  <section>
+    <h2>Ask a Question</h2>
+    <form id="query-form">
+      <input type="text" id="question" name="question" placeholder="Ask a question about the uploaded documents" size="60">
+      <button type="submit">Ask</button>
+    </form>
+    <div id="query-error"></div>
+    <div id="answer"></div>
+    <div id="citations"></div>
+  </section>
+
   <script src="app.js"></script>
 </body>
 </html>
