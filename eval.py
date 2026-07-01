@@ -493,26 +493,50 @@ def test_ingestion_chunking_parameters():
 def test_embedding_dimensionality():
     """BGE-Large must produce 1024-dimensional embeddings.
 
-    Sprint 2 implementation:
-      - Load embedding_service
-      - Embed a test sentence
-      - Assert output shape is (1, 1024)
+    Embeds a single query and a batch of chunks, asserting shapes
+    (1024,) and (N, 1024) respectively, plus L2-normalization and dtype.
     """
-    # STUB: validates the expected constant
-    EXPECTED_DIM = 1024
-    assert EXPECTED_DIM == 1024
+    import numpy as np
+
+    from backend.models.schemas import Chunk
+    from backend.services.embedding_service import embed_chunks, embed_query
+
+    query_vec = embed_query("What was the reported revenue in Q3?")
+    assert query_vec.shape == (1024,), f"Expected (1024,), got {query_vec.shape}"
+    assert query_vec.dtype == np.float32
+    assert abs(np.linalg.norm(query_vec) - 1.0) < 1e-3, "Query embedding must be L2-normalized"
+
+    chunks = [
+        Chunk(
+            id=f"chunk-{i}",
+            document_id="doc-1",
+            document_name="test.pdf",
+            text=f"This is sample chunk text number {i} about revenue and operations.",
+            page_number=1,
+            chunk_index=i,
+            token_count=10,
+        )
+        for i in range(3)
+    ]
+    chunk_vecs = embed_chunks(chunks)
+    assert chunk_vecs.shape == (3, 1024), f"Expected (3, 1024), got {chunk_vecs.shape}"
+    assert chunk_vecs.dtype == np.float32
+    norms = np.linalg.norm(chunk_vecs, axis=1)
+    assert np.allclose(norms, 1.0, atol=1e-3), "Chunk embeddings must be L2-normalized"
 
 
 def test_embedding_gpu_allocation():
-    """Embedding model must load on GPU 0 (DESIGN.md Section 5.5).
+    """Embedding model must load on GPU 0 (DESIGN.md Section 5.5)."""
+    import torch
 
-    Sprint 2 implementation:
-      - Load embedding_service
-      - Check model.device == torch.device('cuda:0')
-    """
-    # STUB: validates config constant
-    EMBEDDING_GPU_ID = 0
-    assert EMBEDDING_GPU_ID == 0, "Embedding model must be on GPU 0"
+    from backend.config import settings
+    from backend.services.embedding_service import _device, _model
+
+    assert settings.EMBEDDING_GPU_ID == 0, "Embedding model must be configured for GPU 0"
+    assert _device == torch.device("cuda:0"), f"Expected cuda:0, got {_device}"
+    assert _model.device.type == "cuda" and _model.device.index == 0, (
+        f"Model must be loaded on cuda:0, got {_model.device}"
+    )
 
 
 def test_vector_store_add_and_search():
