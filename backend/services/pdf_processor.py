@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
@@ -10,7 +11,15 @@ import fitz
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from transformers import AutoTokenizer
 
-from backend.models.schemas import Chunk, ExtractionErrorType, PageText, PDFExtractionResult
+from backend.models.schemas import (
+    Chunk,
+    DocumentMetadata,
+    ExtractionErrorType,
+    PageText,
+    PDFExtractionResult,
+    ProcessingStatus,
+    ProcessPDFResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -181,3 +190,50 @@ def chunk_pages(pages: list[PageText], document_id: str, document_name: str) -> 
         chunk_index += 1
 
     return chunks
+
+
+def process_pdf(
+    source: str | Path | bytes,
+    filename: str,
+    existing_hashes: dict[str, DocumentMetadata] | None = None,
+) -> ProcessPDFResult:
+    """Extract, dedup, and chunk one PDF into a ProcessPDFResult (DESIGN.md Section 7).
+
+    Stateless: `existing_hashes` is caller-owned (router state, S5). Never raises —
+    a failed extraction returns success=False without chunking.
+    """
+    extraction = extract_pdf_text(source)
+    if not extraction.success:
+        return ProcessPDFResult(
+            success=False,
+            error_type=extraction.error_type,
+            error_message=extraction.error_message,
+        )
+
+    if existing_hashes and extraction.sha256 in existing_hashes:
+        return ProcessPDFResult(
+            success=True,
+            is_duplicate=True,
+            metadata=existing_hashes[extraction.sha256],
+        )
+
+    document_id = str(uuid4())
+    chunks = chunk_pages(extraction.pages, document_id=document_id, document_name=filename)
+
+    metadata = DocumentMetadata(
+        id=document_id,
+        filename=filename,
+        sha256=extraction.sha256,
+        upload_time=datetime.utcnow(),
+        page_count=extraction.page_count,
+        chunk_count=len(chunks),
+        status=ProcessingStatus.COMPLETED,
+        file_size_bytes=extraction.file_size_bytes,
+    )
+
+    return ProcessPDFResult(
+        success=True,
+        metadata=metadata,
+        chunks=chunks,
+        warning=extraction.warning,
+    )

@@ -317,66 +317,85 @@ def test_schema_query_response_structure():
 # ===========================================================================
 
 def test_ingestion_valid_pdf_returns_metadata():
-    """A valid PDF should produce DocumentMetadata with page_count > 0 and chunk_count > 0.
+    """A valid PDF should produce DocumentMetadata with page_count > 0 and chunk_count > 0."""
+    import fitz
+    from backend.models.schemas import ProcessingStatus
+    from backend.services.pdf_processor import process_pdf
 
-    Sprint 1 implementation:
-      - Create a small test PDF in /tmp
-      - Call pdf_processor.process_pdf(path)
-      - Assert returned DocumentMetadata has correct fields
-    """
-    # STUB: passes trivially until pdf_processor.py exists
-    metadata = {
-        "id": "stub-uuid",
-        "filename": "test.pdf",
-        "page_count": 5,
-        "chunk_count": 23,
-        "status": "completed",
-    }
-    assert metadata["page_count"] > 0
-    assert metadata["chunk_count"] > 0
+    doc = fitz.open()
+    for _ in range(2):
+        page = doc.new_page()
+        page.insert_text((72, 72), "Real extractable sentence for eval.py. " * 20)
+    data = doc.tobytes()
+    doc.close()
+
+    result = process_pdf(data, filename="test.pdf")
+
+    assert result.success is True
+    assert result.metadata is not None
+    assert result.metadata.filename == "test.pdf"
+    assert result.metadata.page_count == 2
+    assert result.metadata.chunk_count > 0
+    assert result.metadata.status == ProcessingStatus.COMPLETED
+    assert len(result.chunks) == result.metadata.chunk_count
 
 
 def test_ingestion_empty_pdf_returns_error():
-    """An empty PDF (0 extractable text) must return an error, not pollute the index.
+    """An empty PDF (0 extractable text) must return an error, not pollute the index."""
+    import fitz
+    from backend.models.schemas import ExtractionErrorType
+    from backend.services.pdf_processor import process_pdf
 
-    Sprint 1 implementation:
-      - Create a blank PDF (0 text pages)
-      - Call pdf_processor.process_pdf(path)
-      - Assert it returns an error result with status='failed'
-      - Assert vector store was NOT modified
-    """
-    # STUB: passes trivially
-    is_empty = True  # Simulates detection
-    assert is_empty, "Empty PDF should be detected"
+    doc = fitz.open()
+    doc.new_page()
+    data = doc.tobytes()
+    doc.close()
+
+    result = process_pdf(data, filename="empty.pdf")
+
+    assert result.success is False
+    assert result.metadata is None
+    assert result.chunks == []
+    assert result.error_type == ExtractionErrorType.EMPTY
 
 
 def test_ingestion_corrupted_pdf_does_not_crash():
-    """A corrupted PDF must be caught gracefully — not crash the pipeline.
+    """A corrupted PDF must be caught gracefully — not crash the pipeline."""
+    from backend.models.schemas import ExtractionErrorType
+    from backend.services.pdf_processor import process_pdf
 
-    Sprint 1 implementation:
-      - Write random bytes to a .pdf file
-      - Call pdf_processor.process_pdf(path)
-      - Assert it returns error, does not raise unhandled exception
-      - Assert remaining PDFs in batch still process
-    """
-    # STUB: passes trivially
-    caught = True  # Simulates fitz.FileDataError being caught
-    assert caught, "Corrupted PDF should be caught, not crash"
+    data = b"not a real pdf file, just random bytes" * 100
+
+    result = process_pdf(data, filename="corrupted.pdf")
+
+    assert result.success is False
+    assert result.metadata is None
+    assert result.chunks == []
+    assert result.error_type == ExtractionErrorType.CORRUPTED
 
 
 def test_ingestion_sha256_dedup_skips_duplicate():
-    """Uploading the same PDF twice must skip re-processing (SHA-256 dedup).
+    """Uploading the same PDF twice must skip re-processing (SHA-256 dedup)."""
+    import fitz
+    from backend.services.pdf_processor import process_pdf
 
-    Sprint 1 implementation:
-      - Process a PDF once, record its sha256
-      - Process the same file again
-      - Assert second call returns existing metadata, not new processing
-      - Assert vector store chunk count did not increase
-    """
-    # STUB: passes trivially
-    first_hash = "abc123"
-    second_hash = "abc123"
-    assert first_hash == second_hash, "Same file should produce same hash"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Duplicate detection test sentence. " * 20)
+    data = doc.tobytes()
+    doc.close()
+
+    first = process_pdf(data, filename="dup.pdf")
+    assert first.success is True
+    assert first.is_duplicate is False
+
+    existing_hashes = {first.metadata.sha256: first.metadata}
+    second = process_pdf(data, filename="dup.pdf", existing_hashes=existing_hashes)
+
+    assert second.success is True
+    assert second.is_duplicate is True
+    assert second.metadata == first.metadata
+    assert second.chunks == []
 
 
 def test_extraction_valid_pdf_returns_pages():

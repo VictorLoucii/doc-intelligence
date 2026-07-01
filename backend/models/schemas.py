@@ -68,6 +68,18 @@ class Chunk(BaseModel):
     token_count: int
 
 
+class ProcessPDFResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool
+    metadata: DocumentMetadata | None = None
+    chunks: list[Chunk] = Field(default_factory=list)
+    is_duplicate: bool = False
+    error_type: ExtractionErrorType | None = None
+    error_message: str | None = None
+    warning: str | None = None
+
+
 class QueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
