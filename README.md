@@ -169,6 +169,11 @@ All models use explicit `torch.device('cuda:N')` assignments to prevent memory c
 | 10 | **Programmatic LLM bypasses** | "How many documents?" = direct count. No LLM needed. Eliminates hallucination for factual queries. | Extra routing logic |
 | 11 | **SHA-256 dedup at upload** | Prevents duplicate embeddings polluting vector store. Deterministic, zero false positives. | 5 lines of code, near-zero cost |
 | 12 | **No Celery/Redis** — Synchronous processing | 50 PDFs × ~1s = ~50s total. Loading spinner acceptable. Celery+Redis = 1–2 hours of setup time. | Not viable at 10k+ documents |
+| 13 | **Sigmoid-normalize cross-encoder scores** | Raw `CrossEncoder.predict()` logits are unbounded (~7.4 relevant, ~-11.2 irrelevant), not the `[0,1]` range the 0.3 threshold and `Citation.relevance_score` assume. Sigmoid preserves rank order while rescaling into `[0,1]`. | Not a true calibrated probability, just monotonic and bounded — sufficient for thresholding |
+| 14 | **Citations built from `Chunk` objects, never parsed from LLM output** | Parsing quotes out of LLM-generated text risks paraphrasing despite the anti-summary prompt — a prompt is a request, not a guarantee. Building `chunk_text` directly from `chunk.text` makes the verbatim guarantee structural. | None — the LLM never touches citation text |
+| 15 | **`/upload` always returns HTTP 200 with `list[ProcessPDFResult]`** | Per-file success/failure lives in `ProcessPDFResult.success`/`error_type`, not the HTTP status, so one bad PDF in a batch never fails the rest (CLAUDE.md 5.7). | Callers must check `.success` per item instead of relying on the response status code |
+| 16 | **`vector_store` accessor pattern** (`is_empty()`, `document_count()`, `all_chunks()`) | Routers never read `_index.ntotal` or `_chunks_by_id` directly, so the append-only-during-queries rule (CLAUDE.md 5.9) stays enforceable in one file even if the internal index type changes. | Small indirection layer for every vector-store read |
+| 17 | **LLM-synthesized insights, grounded via chunk-index references** | The LLM returns `supporting_chunk_ids` (indices into the chunks we sent), not citation text — the service resolves those back to `Chunk` objects, extending row 14's verbatim-citation guarantee to `/insights`. Insights whose chunks don't span ≥2 documents are dropped. | Extra LLM call per `/insights` request; insight quality depends on the LLM assigning chunk indices correctly |
 
 ---
 
@@ -306,7 +311,7 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```bash
 # Run the evaluation harness
 python eval.py -v
-# Expected: 🎯 Logic Score: 100% — ALL 30 TESTS PASSED
+# Expected: 🎯 Logic Score: 100% — ALL 39 TESTS PASSED
 ```
 
 ---
@@ -315,10 +320,11 @@ python eval.py -v
 
 | Method | Endpoint | Description | Request | Response |
 |---|---|---|---|---|
-| `POST` | `/upload` | Upload one or more PDFs | `multipart/form-data` (files) | `DocumentMetadata[]` |
+| `POST` | `/upload` | Upload one or more PDFs (always 200 — per-file result in the body, see Section 4 row 15) | `multipart/form-data` (files) | `list[ProcessPDFResult]` |
 | `GET` | `/documents` | List all uploaded documents | — | `DocumentMetadata[]` |
 | `DELETE` | `/documents/{id}` | Remove a document and its embeddings | — | `204 No Content` |
 | `POST` | `/query` | Ask a question about uploaded documents | `{"question": "...", "top_k": 5}` | `QueryResponse` |
+| `POST` | `/insights` | Cross-document theme synthesis — no request body. `400` if the vector store is empty; `[]` if fewer than 2 documents are indexed. | — | `list[InsightSuggestion]` |
 
 ### QueryResponse Schema
 
@@ -353,7 +359,8 @@ python eval.py -v
 | **S3** Cross-Encoder Reranker | 3:00–4:00 | ms-marco on GPU 1. Rerank top-50 → top-5. Relevance threshold. | `python eval.py` — reranking beats bi-encoder |
 | **S4** Answer Generation | 4:00–5:15 | LLM prompt with anti-summary mandate. Verbatim citations. | `python eval.py` — citations are verbatim |
 | **S5** API + Frontend | 5:15–6:15 | FastAPI routers + HTML/JS upload, question, answer display. | Browser test: upload → ask → see citations |
-| **S6** Edge Cases | 6:15–7:00 | Empty PDF, irrelevant query, error messages, logging. | `python eval.py` — all edge cases pass |
+| **S6** Edge Cases ✅ Complete | 6:15–7:00 | Empty PDF, irrelevant query, error messages, logging. | `python eval.py` — all edge cases pass |
+| **S7** Insight Engine ✅ Complete | 7:00–7:30 | `insight_engine.py`: LLM-synthesized cross-document theme detection + suggested follow-up questions, wired to `POST /insights`. | `python eval.py` — insight tests pass |
 
 ---
 
@@ -398,7 +405,7 @@ python eval.py -v
 Expected output:
 
 ```
-🎯 Logic Score: 100% — ALL 30 TESTS PASSED
+🎯 Logic Score: 100% — ALL 39 TESTS PASSED
 ```
 
 ---
