@@ -1119,16 +1119,26 @@ def test_api_query_before_upload_returns_400():
 # ===========================================================================
 
 def test_edge_case_password_protected_pdf():
-    """Password-protected PDF must return error, not crash.
+    """Password-protected PDF must return error, not crash."""
+    import fitz
+    from backend.models.schemas import ExtractionErrorType
+    from backend.services.pdf_processor import process_pdf
 
-    Sprint 6 implementation:
-      - Create or provide a password-protected PDF
-      - Call pdf_processor.process_pdf(path)
-      - Assert error response, HTTP 422
-    """
-    # STUB
-    is_encrypted = True
-    assert is_encrypted, "Should detect encrypted PDF"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "secret content")
+    buffer = doc.tobytes(
+        encryption=fitz.PDF_ENCRYPT_AES_256,
+        owner_pw="owner-secret",
+        user_pw="user-secret",
+    )
+    doc.close()
+
+    result = process_pdf(buffer, filename="locked.pdf")
+
+    assert result.success is False
+    assert result.metadata is None
+    assert result.error_type == ExtractionErrorType.PASSWORD_PROTECTED
 
 
 def test_edge_case_malformed_query():

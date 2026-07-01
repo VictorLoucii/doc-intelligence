@@ -275,6 +275,8 @@ class InsightSuggestion(BaseModel):
 | **Non-English PDF** | Not detected at upload | BGE model handles English well. Non-English recall may degrade. Document in README as limitation. | 200 |
 | **Malformed question** (empty, too long) | Pydantic validation on `QueryRequest` | Return validation error with details. | 422 |
 
+> **Note (Decision 16):** For `/upload`, the PDF-processing error codes in this table (e.g. 422 for password-protected/corrupted) surface in the response body via `ProcessPDFResult.error_type`, not as the top-level HTTP status — `/upload` always returns HTTP 200 per file.
+
 ---
 
 ## 8. What Breaks at Scale (10,000+ Documents)
