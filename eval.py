@@ -584,6 +584,61 @@ def test_vector_store_add_and_search():
         vs.delete_document("vs-doc-1")  # keep the module-level index clean for other tests
 
 
+def test_retrieval_finds_known_relevant_chunk():
+    """End-to-end semantic retrieval: real embeddings + FAISS must surface the
+    one chunk that actually answers the query, ranked first, among noise from
+    earlier tests (DESIGN.md S2 verification: 'top-50 contains known relevant
+    chunks').
+    """
+    from backend.models.schemas import Chunk
+    from backend.services import embedding_service, vector_store as vs
+
+    chunks = [
+        Chunk(
+            id="topic-invoice",
+            document_id="topic-doc",
+            document_name="topics.pdf",
+            text="Invoice payment terms require full payment within 30 days of the invoice date.",
+            page_number=1,
+            chunk_index=0,
+            token_count=15,
+        ),
+        Chunk(
+            id="topic-solar",
+            document_id="topic-doc",
+            document_name="topics.pdf",
+            text="Solar panel efficiency depends on the angle of installation and cell temperature.",
+            page_number=1,
+            chunk_index=1,
+            token_count=14,
+        ),
+        Chunk(
+            id="topic-vacation",
+            document_id="topic-doc",
+            document_name="topics.pdf",
+            text="Employees accrue vacation policy days based on years of continuous service.",
+            page_number=1,
+            chunk_index=2,
+            token_count=13,
+        ),
+    ]
+
+    try:
+        embeddings = embedding_service.embed_chunks(chunks)
+        vs.add_chunks(chunks, embeddings)
+
+        query_vec = embedding_service.embed_query("What are the payment terms for invoices?")
+        results = vs.search(query_vec, top_k=50)
+
+        result_ids = [chunk.id for chunk, _ in results]
+        assert "topic-invoice" in result_ids, "Known relevant chunk missing from top-50"
+        assert results[0][0].id == "topic-invoice", (
+            f"Expected the invoice chunk to rank first, got {results[0][0].id}"
+        )
+    finally:
+        vs.delete_document("topic-doc")
+
+
 def test_vector_store_empty_returns_error():
     """Querying an empty vector store must return [] without raising.
 
@@ -898,6 +953,7 @@ def main() -> int:
         ("embed_dimensionality_1024", test_embedding_dimensionality, "S2"),
         ("embed_gpu_0_allocation", test_embedding_gpu_allocation, "S2"),
         ("vector_store_add_search", test_vector_store_add_and_search, "S2"),
+        ("retrieval_finds_known_relevant_chunk", test_retrieval_finds_known_relevant_chunk, "S2"),
         ("vector_store_empty_error", test_vector_store_empty_returns_error, "S2"),
 
         # S3 — Cross-Encoder Reranking
