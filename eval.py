@@ -661,31 +661,51 @@ def test_vector_store_empty_returns_error():
 # ===========================================================================
 
 def test_reranker_gpu_allocation():
-    """Cross-encoder must load on GPU 1 (DESIGN.md Section 5.5).
+    """Cross-encoder must load on GPU 1 (DESIGN.md Section 5.5)."""
+    import torch
 
-    Sprint 3 implementation:
-      - Load reranker service
-      - Check model device == torch.device('cuda:1')
-    """
-    # STUB: validates config constant
-    RERANKER_GPU_ID = 1
-    assert RERANKER_GPU_ID == 1, "Reranker must be on GPU 1"
+    from backend.config import settings
+    from backend.services.reranker import _device, _model
+
+    assert settings.RERANKER_GPU_ID == 1, "Reranker must be configured for GPU 1"
+    assert _device == torch.device("cuda:1"), f"Expected cuda:1, got {_device}"
+    assert _model.device.type == "cuda" and _model.device.index == 1, (
+        f"Model must be loaded on cuda:1, got {_model.device}"
+    )
 
 
 def test_reranker_reduces_candidates():
-    """Reranker must reduce top-50 candidates to top-5.
+    """Reranker must reduce top-50 candidates to top-5, scores descending."""
+    from backend.models.schemas import Chunk
+    from backend.services.reranker import rerank
 
-    Sprint 3 implementation:
-      - Provide 50 (query, chunk) pairs with known relevance
-      - Run through reranker.rerank()
-      - Assert output is exactly 5 items
-      - Assert output scores are descending
-    """
-    # STUB: validates pipeline parameters
-    INPUT_CANDIDATES = 50
-    OUTPUT_TOP_K = 5
-    assert INPUT_CANDIDATES >= 30, "Must retrieve at least 30 candidates (CLAUDE.md 5.4)"
-    assert OUTPUT_TOP_K == 5
+    query = "What are the payment terms for invoices?"
+    candidates = [
+        (
+            Chunk(
+                id=f"rr-chunk-{i}",
+                document_id="rr-doc",
+                document_name="test.pdf",
+                text=(
+                    "Invoice payment terms require full payment within 30 days of the invoice date."
+                    if i == 0
+                    else f"Unrelated filler text number {i} about office supplies and weather."
+                ),
+                page_number=1,
+                chunk_index=i,
+                token_count=15,
+            ),
+            1.0 - i * 0.01,
+        )
+        for i in range(50)
+    ]
+
+    results = rerank(query, candidates, top_k=5)
+
+    assert len(results) == 5, f"Expected 5 results, got {len(results)}"
+    scores = [score for _, score in results]
+    assert all(scores[i] >= scores[i + 1] for i in range(len(scores) - 1)), "Scores must be descending"
+    assert results[0][0].id == "rr-chunk-0", "Known relevant chunk must rank first after reranking"
 
 
 def test_reranker_improves_precision():
