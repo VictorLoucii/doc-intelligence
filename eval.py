@@ -542,46 +542,62 @@ def test_embedding_gpu_allocation():
 def test_vector_store_add_and_search():
     """FAISS index: add vectors, search returns correct top-k candidates.
 
-    Sprint 2 implementation:
-      - Create a FAISS IndexFlatIP with dim=1024
-      - Add 100 random vectors with known IDs
-      - Search with a query vector
-      - Assert returned IDs are valid, scores are descending
-      - Assert top_k=50 returns exactly 50 results
+    Adds 100 known chunks + L2-normalized embeddings via add_chunks, then
+    searches with one of the added vectors as the query. Asserts exactly
+    top_k=50 results come back, scores are descending, and the exact-match
+    vector ranks first.
     """
-    # STUB: basic FAISS smoke test with numpy
     import numpy as np
+
+    from backend.models.schemas import Chunk
+    from backend.services import vector_store as vs
 
     dim = 1024
     n_vectors = 100
     top_k = 50
 
-    # Simulate: we would use faiss.IndexFlatIP here
+    chunks = [
+        Chunk(
+            id=f"vs-chunk-{i}",
+            document_id="vs-doc-1",
+            document_name="test.pdf",
+            text=f"sample text {i}",
+            page_number=1,
+            chunk_index=i,
+            token_count=5,
+        )
+        for i in range(n_vectors)
+    ]
     vectors = np.random.randn(n_vectors, dim).astype(np.float32)
-    query = np.random.randn(1, dim).astype(np.float32)
+    vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
 
-    # Simulated search: cosine similarity via dot product on normalized vecs
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    normed = vectors / (norms + 1e-8)
-    q_norm = query / (np.linalg.norm(query) + 1e-8)
-    scores = (normed @ q_norm.T).flatten()
-    top_indices = np.argsort(scores)[::-1][:top_k]
+    vs.add_chunks(chunks, vectors)
+    try:
+        query = vectors[7].copy()
+        results = vs.search(query, top_k=top_k)
 
-    assert len(top_indices) == top_k, f"Expected {top_k} results, got {len(top_indices)}"
-    assert scores[top_indices[0]] >= scores[top_indices[-1]], "Scores must be descending"
+        assert len(results) == top_k, f"Expected {top_k} results, got {len(results)}"
+        scores = [score for _, score in results]
+        assert all(scores[i] >= scores[i + 1] for i in range(len(scores) - 1)), "Scores must be descending"
+        assert results[0][0].id == "vs-chunk-7", "Exact-match vector must rank first"
+    finally:
+        vs.delete_document("vs-doc-1")  # keep the module-level index clean for other tests
 
 
 def test_vector_store_empty_returns_error():
-    """Querying an empty vector store must return a clear error, not crash.
+    """Querying an empty vector store must return [] without raising.
 
-    Sprint 2 implementation:
-      - Create an empty FAISS index
-      - Attempt search
-      - Assert it returns empty results or raises informative error
+    Sprint 2 implementation: search() on a fresh (empty) index must not
+    raise — it returns an empty list, which the router turns into the
+    400 from DESIGN.md Section 7.
     """
-    # STUB: passes trivially
-    index_size = 0
-    assert index_size == 0, "Empty store should be detected before search"
+    import numpy as np
+
+    from backend.services import vector_store as vs
+
+    assert vs._index.ntotal == 0, "Vector store must be empty at the start of this test"
+    results = vs.search(np.random.randn(1024).astype(np.float32), top_k=50)
+    assert results == [], "Empty store must return [] rather than raising"
 
 
 # ===========================================================================
